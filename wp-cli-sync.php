@@ -170,7 +170,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
     task_message($task_name);
 
     // pv check
-    if (`which pv`) {
+    if (shell_exec('which pv')) {
       $pipe = '| pv |';
     } else {
       task_message('Install the \'pv\' command to monitor import progress', 'Notice', 33, false);
@@ -204,7 +204,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
       }
     }
 
-    if (`which rsync`) {
+    if (shell_exec('which rsync')) {
       task_message($task_name);
       $command = 'rsync -avhP ' . $ssh_username . '@' . $ssh_hostname . ':' . $rem_proj_loc . '/' . $upload_dir . '/ ./' . $upload_dir . '/' . $excludes;
       debug_message($command);
