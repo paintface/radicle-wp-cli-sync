@@ -73,6 +73,8 @@ DEV_POST_SYNC_QUERIES=""
 
 To sync only part of the site, pass a flag: `wp sync --database` (database only) or `wp sync --media` (uploads folder only). With no flags, everything is synced.
 
+After a database sync, live URLs are replaced automatically across all tables: the live URL is read from `WP_HOME` in the remote `.env`, the dev URL from your local one. No extra configuration is needed.
+
 ## First Sync
 
 You may find yourself working on a bedrock project that already exists on a production server and you don't have the database setup locally yet. Running `wp sync` in the project will fail in this case as it requires an active WordPress installation to run.
