@@ -26,30 +26,43 @@ foreach($env_variables as $env_variable) {
 
 // Define Sync Command
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
-  $sync = function() {
+  $sync = function($args, $assoc_args) {
 
-    // Task Message
-    function task_message($message, $title='Task', $color = 34, $firstBreak = true) {
-      if($firstBreak == true) {
-        echo "\n";
-      }
-      echo "\033[".$color."m".$title.": ".$message."\n\033[0m";
-    }
+    // Flags: --database / --media limit the sync; neither = sync everything.
+    // WP-CLI passes --no-<flag> as false, so isset() would treat it as opted-in.
+    $database_flag  = $assoc_args['database'] ?? null;
+    $media_flag     = $assoc_args['media'] ?? null;
+    $only_requested = ($database_flag === true) || ($media_flag === true);
+    $sync_database  = $database_flag ?? !$only_requested;
+    $sync_media     = $media_flag ?? !$only_requested;
 
-    // Debug Message
-    function debug_message($message, $title='Debug', $color = 33, $firstBreak = false) {
-      if (empty($_ENV['DEV_TASK_DEBUG'])) {
-        return;
-      }
-      if ($firstBreak == true) {
-        echo "\n";
-      }
-      echo "\033[".$color."m".$title.": ".$message."\n\033[0m";
-    }
+    // Message helpers (guarded: redeclaring fatals if sync runs twice in one process)
+    if (!function_exists('task_message')) {
 
-    // Line Break + Color Reset
-    function lb_cr() {
-      echo "\n\033[0m";
+      // Task Message
+      function task_message($message, $title='Task', $color = 34, $firstBreak = true) {
+        if($firstBreak == true) {
+          echo "\n";
+        }
+        echo "\033[".$color."m".$title.": ".$message."\n\033[0m";
+      }
+
+      // Debug Message
+      function debug_message($message, $title='Debug', $color = 33, $firstBreak = false) {
+        if (empty($_ENV['DEV_TASK_DEBUG'])) {
+          return;
+        }
+        if ($firstBreak == true) {
+          echo "\n";
+        }
+        echo "\033[".$color."m".$title.": ".$message."\n\033[0m";
+      }
+
+      // Line Break + Color Reset
+      function lb_cr() {
+        echo "\n\033[0m";
+      }
+
     }
 
     // Fail Count Var
@@ -122,19 +135,23 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
     }
 
-    // Check if WP-CLI is installed on live server
-    $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"test -f '.$rem_proj_loc.'/vendor/bin/wp && echo true || echo false\""';
-    $live_server_check = exec($command);
+    // Check if WP-CLI is installed on live server (only needed for database sync)
+    if ($sync_database) {
 
-    if ($live_server_check == 'false') {
+      $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"test -f '.$rem_proj_loc.'/vendor/bin/wp && echo true || echo false\""';
+      $live_server_check = exec($command);
 
-      // Exit Messages
-      task_message('Connected but cannot find remote WP-CLI', 'Error', 31, false);
-      task_message('Either WP-CLI Sync is not installed on the live server or the REMOTE_PROJECT_LOCATION variable is incorrect', 'Hint', 33);
+      if ($live_server_check == 'false') {
 
-      // Line Break + Color Reset + Exit
-      lb_cr();
-      exit();
+        // Exit Messages
+        task_message('Connected but cannot find remote WP-CLI', 'Error', 31, false);
+        task_message('Either WP-CLI Sync is not installed on the live server or the REMOTE_PROJECT_LOCATION variable is incorrect', 'Hint', 33);
+
+        // Line Break + Color Reset + Exit
+        lb_cr();
+        exit();
+
+      }
 
     }
 
@@ -148,86 +165,105 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
     // Move to project root
     chdir(ABSPATH.'../../');
 
-    // Activate Maintenance Mode
-    $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode activate';
-    exec($command);
+    // Activate Maintenance Mode (media-only syncs don't touch the database)
+    if ($sync_database) {
+      $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode activate';
+      exec($command);
+    }
 
     /**
      * TASK: Database Sync
      */
-    $task_name = 'Sync Database';
-    task_message($task_name);
+    if ($sync_database) {
 
-    // pv check
-    if (`which pv`) {
-      $pipe = '| pv |';
-    } else {
-      task_message('Install the \'pv\' command to monitor import progress', 'Notice', 33, false);
-      $pipe = '|';
-    }
+      $task_name = 'Sync Database';
+      task_message($task_name);
 
-    $command = 'ssh '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"cd '.$rem_proj_loc.' && '.$rem_proj_loc.'/vendor/bin/wp db export --single-transaction -\"" '.$pipe. ' ' . ABSPATH . '/../../vendor/bin/wp db import -';
-    debug_message($command);
-    system($command);
+      // pv check
+      if (`which pv`) {
+        $pipe = '| pv |';
+      } else {
+        task_message('Install the \'pv\' command to monitor import progress', 'Notice', 33, false);
+        $pipe = '|';
+      }
 
-    /**
-     * TASK: Post sync queries
-     */
-    if ($queries = $_ENV['DEV_POST_SYNC_QUERIES']) {
-      $command = ABSPATH . '/../../vendor/bin/wp db query "' . preg_replace('/(`|")/i', '\\\\${1}', $queries) . '"';
+      $command = 'ssh '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"cd '.$rem_proj_loc.' && '.$rem_proj_loc.'/vendor/bin/wp db export --single-transaction -\"" '.$pipe. ' ' . ABSPATH . '/../../vendor/bin/wp db import -';
       debug_message($command);
       system($command);
+
+      /**
+       * TASK: Post sync queries
+       */
+      if ($queries = $_ENV['DEV_POST_SYNC_QUERIES']) {
+        $command = ABSPATH . '/../../vendor/bin/wp db query "' . preg_replace('/(`|")/i', '\\\\${1}', $queries) . '"';
+        debug_message($command);
+        system($command);
+      }
+
     }
 
 
     /**
      * TASK: Sync Uploads Folder
      */
-    $task_name = 'Sync Uploads Folder';
+    if ($sync_media) {
 
-    $excludes  = '';
-    if ($exclude_dirs = $_ENV['DEV_SYNC_DIR_EXCLUDES']) {
-      $exclude_dirs = explode(',', $exclude_dirs);
-      foreach ($exclude_dirs as $dir) {
-        $excludes .= ' --exclude=' . $dir;
+      $task_name = 'Sync Uploads Folder';
+
+      $excludes  = '';
+      if ($exclude_dirs = $_ENV['DEV_SYNC_DIR_EXCLUDES']) {
+        $exclude_dirs = explode(',', $exclude_dirs);
+        foreach ($exclude_dirs as $dir) {
+          $excludes .= ' --exclude=' . $dir;
+        }
       }
-    }
 
-    if (`which rsync`) {
-      task_message($task_name);
-      $command = 'rsync -avhP '.$ssh_username.'@'.$ssh_hostname.':'.$rem_proj_loc.'/web/app/uploads/ ./web/app/uploads/' . $excludes;
-      debug_message($command);
-      system($command);
-    } else {
-      task_message($task_name.' task not ran, please install \'rsync\'', 'Error', 31);
-      $fail_count++;
+      if (`which rsync`) {
+        task_message($task_name);
+        $command = 'rsync -avhP --timeout=120 -e "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6" '.$ssh_username.'@'.$ssh_hostname.':'.$rem_proj_loc.'/web/app/uploads/ ./web/app/uploads/' . $excludes;
+        debug_message($command);
+        system($command, $rsync_status);
+        if ($rsync_status !== 0) {
+          task_message('Uploads sync failed (rsync exit code '.$rsync_status.')', 'Error', 31);
+          $fail_count++;
+        }
+      } else {
+        task_message($task_name.' task not ran, please install \'rsync\'', 'Error', 31);
+        $fail_count++;
+      }
+
     }
 
     /**
      * TASK: Activate / Deactivate Plugins
      */
+    if ($sync_database) {
 
-    // Activate Plugins
-    if (!empty($dev_activated_plugins)) {
-      task_message('Activate Plugins');
-      $cleaned_arr_list = preg_replace('/[ ,]+/', ' ', trim($dev_activated_plugins));
-      $command = ABSPATH . '/../../vendor/bin/wp plugin activate '.$cleaned_arr_list;
-      debug_message($command);
-      system($command);
-    }
+      // Activate Plugins
+      if (!empty($dev_activated_plugins)) {
+        task_message('Activate Plugins');
+        $cleaned_arr_list = preg_replace('/[ ,]+/', ' ', trim($dev_activated_plugins));
+        $command = ABSPATH . '/../../vendor/bin/wp plugin activate '.$cleaned_arr_list;
+        debug_message($command);
+        system($command);
+      }
 
-    // Deactivate Plugins
-    if (!empty($dev_deactivated_plugins)) {
-      task_message('Deactivate Plugins');
-      $cleaned_arr_list = preg_replace('/[ ,]+/', ' ', trim($dev_deactivated_plugins));
-      $command = ABSPATH . '/../../vendor/bin/wp plugin deactivate '.$cleaned_arr_list;
-      debug_message($command);
-      system($command);
+      // Deactivate Plugins
+      if (!empty($dev_deactivated_plugins)) {
+        task_message('Deactivate Plugins');
+        $cleaned_arr_list = preg_replace('/[ ,]+/', ' ', trim($dev_deactivated_plugins));
+        $command = ABSPATH . '/../../vendor/bin/wp plugin deactivate '.$cleaned_arr_list;
+        debug_message($command);
+        system($command);
+      }
+
     }
 
     // Deactivate Maintenance Mode
-    $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode deactivate';
-    exec($command);
+    if ($sync_database) {
+      $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode deactivate';
+      exec($command);
+    }
 
     // Completion Message
     if ($fail_count > 0) {
@@ -241,5 +277,10 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
   };
 
-  WP_CLI::add_command('sync', $sync);
+  WP_CLI::add_command('sync', $sync, array(
+    'synopsis' => array(
+      array('type' => 'flag', 'name' => 'database', 'optional' => true, 'description' => 'Only sync the database'),
+      array('type' => 'flag', 'name' => 'media', 'optional' => true, 'description' => 'Only sync the uploads folder'),
+    ),
+  ));
 }

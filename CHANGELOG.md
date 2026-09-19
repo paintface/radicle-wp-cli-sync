@@ -2,6 +2,11 @@
 
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+### Unreleased
+
+* Added `--database` and `--media` flags to limit the sync
+* Added rsync timeout and SSH keepalive options to the uploads sync
+
 ### 1.3.1: 03/11/2020
 
 * Added welcome and connection success messages
