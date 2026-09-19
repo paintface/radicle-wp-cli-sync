@@ -218,6 +218,37 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
         system($command);
       }
 
+      /**
+       * TASK: Replace Site URLs
+       * Live URL comes from the remote site's home option, dev URL from
+       * WP_HOME, which Radicle's .env always defines — no extra config.
+       */
+      $dev_url = rtrim(getenv('WP_HOME') ?: '', '/');
+      if ($db_status === 0 && $dev_url) {
+
+        $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"cd '.$rem_proj_loc.' && '.$rem_proj_loc.'/vendor/bin/wp option get home\""';
+        debug_message($command);
+        $live_domain = preg_replace('#^https?://(www\.)?#', '', rtrim(exec($command), '/'));
+
+        if ($live_domain && $live_domain !== preg_replace('#^https?://(www\.)?#', '', $dev_url)) {
+
+          task_message('Replace Site URLs');
+
+          // Replace every variant of the live domain left in the database
+          foreach (array('http://', 'https://', 'http://www.', 'https://www.') as $scheme) {
+            $command = ABSPATH . '/../../vendor/bin/wp search-replace '.escapeshellarg($scheme.$live_domain).' '.escapeshellarg($dev_url).' --all-tables --quiet';
+            debug_message($command);
+            system($command);
+          }
+
+          task_message('Replaced '.$live_domain.' with '.$dev_url, 'Site URLs', 33, false);
+
+        }
+
+      } elseif ($db_status === 0) {
+        debug_message('WP_HOME not set, Replace Site URLs task skipped');
+      }
+
     }
 
 
