@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 * Added `--database` and `--media` flags to limit the sync
 * Added rsync timeout and SSH keepalive options to the uploads sync
+* Database import and rsync failures are now detected, reported, and set a non-zero exit code
+* Paths and excludes are shell-escaped in the rsync command
 
 ### 1.3.1: 03/11/2020
 

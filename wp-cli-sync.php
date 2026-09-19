@@ -21,17 +21,15 @@ $env_variables = array(
 	'UPLOAD_DIR'
 );
 
+// getenv() returns false (not null) when unset, so ?? alone never falls through
 foreach ($env_variables as $env_variable) {
-	$_ENV[$env_variable] = $_ENV[$env_variable] ?? getenv($env_variable) ?? getDefault($env_variable);
+	$value = $_ENV[$env_variable] ?? getenv($env_variable);
+	$_ENV[$env_variable] = ($value === false || $value === null || $value === '') ? getDefault($env_variable) : $value;
 }
 
-function getDefault($env_variable): bool|array|string
+function getDefault($env_variable): string
 {
-	if ($env_variable === 'UPLOAD_DIR') {
-		return getenv($env_variable) ?: 'web/app/uploads';
-	} else {
-		return '';
-	}
+	return $env_variable === 'UPLOAD_DIR' ? 'web/app/uploads' : '';
 }
 
 // Define Sync Command
@@ -40,24 +38,28 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
     // Flags: --database / --media limit the sync; neither = sync everything.
     // WP-CLI passes --no-<flag> as false, so isset() would treat it as opted-in.
-    $database_flag  = $assoc_args['database'] ?? null;
-    $media_flag     = $assoc_args['media'] ?? null;
+    // filter_var: bare flag / --flag=true → true, --no-flag / --flag=false → false
+    $database_flag  = isset($assoc_args['database']) ? filter_var($assoc_args['database'], FILTER_VALIDATE_BOOLEAN) : null;
+    $media_flag     = isset($assoc_args['media']) ? filter_var($assoc_args['media'], FILTER_VALIDATE_BOOLEAN) : null;
     $only_requested = ($database_flag === true) || ($media_flag === true);
     $sync_database  = $database_flag ?? !$only_requested;
     $sync_media     = $media_flag ?? !$only_requested;
 
-    // Message helpers (guarded: redeclaring fatals if sync runs twice in one process)
-    if (!function_exists('task_message')) {
+    if (!$sync_database && !$sync_media) {
+      WP_CLI::error('Nothing to sync: both --no-database and --no-media given.');
+    }
 
-      // Task Message
+    // Message helpers (each guarded: redeclaring fatals if sync runs twice in one process)
+    if (!function_exists('task_message')) {
       function task_message($message, $title='Task', $color = 34, $firstBreak = true) {
         if($firstBreak == true) {
           echo "\n";
         }
         echo "\033[".$color."m".$title.": ".$message."\n\033[0m";
       }
+    }
 
-      // Debug Message
+    if (!function_exists('debug_message')) {
       function debug_message($message, $title='Debug', $color = 33, $firstBreak = false) {
         if (empty($_ENV['DEV_TASK_DEBUG'])) {
           return;
@@ -67,12 +69,13 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
         }
         echo "\033[".$color."m".$title.": ".$message."\n\033[0m";
       }
+    }
 
-      // Line Break + Color Reset
+    // Line Break + Color Reset
+    if (!function_exists('lb_cr')) {
       function lb_cr() {
         echo "\n\033[0m";
       }
-
     }
 
     // Fail Count Var
@@ -82,9 +85,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
     $ssh_hostname = $_ENV['LIVE_SSH_HOSTNAME'];
     $ssh_username = $_ENV['LIVE_SSH_USERNAME'];
     $rem_proj_loc = $_ENV['REMOTE_PROJECT_LOCATION'];
-    // getenv() returns false (not null) when unset, so the ?? getDefault() chain
-    // above never fires — default here or an empty value syncs the project root
-    $upload_dir = !empty($_ENV['UPLOAD_DIR']) ? $_ENV['UPLOAD_DIR'] : 'web/app/uploads';
+    $upload_dir = $_ENV['UPLOAD_DIR'];
 
     // Welcome
     task_message('Running .env file and connection checks...', 'WP-CLI Sync', 97);
@@ -101,7 +102,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
       // Line Break + Color Reset + Exit
       lb_cr();
-      exit();
+      exit(1);
 
     }
 
@@ -114,7 +115,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
       // Line Break + Color Reset + Exit
       lb_cr();
-      exit();
+      exit(1);
 
     } elseif($rem_proj_loc[0] == '~') {
 
@@ -126,7 +127,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
         // Line Break + Color Reset + Exit
         lb_cr();
-        exit();
+        exit(1);
 
       }
 
@@ -144,7 +145,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
       // Line Break + Color Reset + Exit
       lb_cr();
-      exit();
+      exit(1);
 
     }
 
@@ -154,7 +155,8 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
       $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"test -f '.$rem_proj_loc.'/vendor/bin/wp && echo true || echo false\""';
       $live_server_check = exec($command);
 
-      if ($live_server_check == 'false') {
+      // Anything but an explicit 'true' (e.g. empty output from a dropped ssh) is a failure
+      if ($live_server_check !== 'true') {
 
         // Exit Messages
         task_message('Connected but cannot find remote WP-CLI', 'Error', 31, false);
@@ -162,7 +164,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
         // Line Break + Color Reset + Exit
         lb_cr();
-        exit();
+        exit(1);
 
       }
 
@@ -178,16 +180,14 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
     // Move to project root
     chdir(ABSPATH.'../../');
 
-    // Activate Maintenance Mode (media-only syncs don't touch the database)
-    if ($sync_database) {
-      $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode activate';
-      exec($command);
-    }
-
     /**
      * TASK: Database Sync
      */
     if ($sync_database) {
+
+      // Activate Maintenance Mode (media-only syncs don't touch the database)
+      $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode activate';
+      exec($command);
 
       $task_name = 'Sync Database';
       task_message($task_name);
@@ -202,12 +202,17 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
       $command = 'ssh '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"cd '.$rem_proj_loc.' && '.$rem_proj_loc.'/vendor/bin/wp db export --single-transaction -\"" '.$pipe. ' ' . ABSPATH . '/../../vendor/bin/wp db import -';
       debug_message($command);
-      system($command);
+      // pipefail so a failed remote export can't silently import a truncated dump
+      system('bash -c '.escapeshellarg('set -o pipefail; '.$command), $db_status);
+      if ($db_status !== 0) {
+        task_message('Database sync failed (exit code '.$db_status.')', 'Error', 31);
+        $fail_count++;
+      }
 
       /**
-       * TASK: Post sync queries
+       * TASK: Post sync queries (skipped if the import failed)
        */
-      if ($queries = $_ENV['DEV_POST_SYNC_QUERIES']) {
+      if ($db_status === 0 && ($queries = $_ENV['DEV_POST_SYNC_QUERIES'])) {
         $command = ABSPATH . '/../../vendor/bin/wp db query "' . preg_replace('/(`|")/i', '\\\\${1}', $queries) . '"';
         debug_message($command);
         system($command);
@@ -227,16 +232,17 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
       if ($exclude_dirs = $_ENV['DEV_SYNC_DIR_EXCLUDES']) {
         $exclude_dirs = explode(',', $exclude_dirs);
         foreach ($exclude_dirs as $dir) {
-          $excludes .= ' --exclude=' . $dir;
+          $excludes .= ' --exclude=' . escapeshellarg($dir);
         }
       }
 
       if (shell_exec('which rsync')) {
         task_message($task_name);
-        $command = 'rsync -avhP --timeout=120 -e "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6" '.$ssh_username.'@'.$ssh_hostname.':'.$rem_proj_loc.'/'.$upload_dir.'/ ./'.$upload_dir.'/' . $excludes;
+        $command = 'rsync -avhP --timeout=120 -e "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6" '.escapeshellarg($ssh_username.'@'.$ssh_hostname.':'.$rem_proj_loc.'/'.$upload_dir.'/').' '.escapeshellarg('./'.$upload_dir.'/') . $excludes;
         debug_message($command);
         system($command, $rsync_status);
-        if ($rsync_status !== 0) {
+        // 24 = files vanished mid-transfer, routine when the live site is writing uploads
+        if ($rsync_status !== 0 && $rsync_status !== 24) {
           task_message('Uploads sync failed (rsync exit code '.$rsync_status.')', 'Error', 31);
           $fail_count++;
         }
@@ -270,20 +276,19 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
         system($command);
       }
 
-    }
-
-    // Deactivate Maintenance Mode
-    if ($sync_database) {
+      // Deactivate Maintenance Mode
       $command = ABSPATH . '/../../vendor/bin/wp maintenance-mode deactivate';
       exec($command);
+
     }
 
     // Completion Message
     if ($fail_count > 0) {
       task_message('Finished with '.$fail_count. ' errors', 'Warning', 33);
-    } else {
-      task_message('All Tasks Finished', 'Success', 32);
+      lb_cr();
+      exit(1);
     }
+    task_message('All Tasks Finished', 'Success', 32);
 
     // Final Line Break + Color Reset
     lb_cr();
