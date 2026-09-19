@@ -220,15 +220,17 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
       /**
        * TASK: Replace Site URLs
-       * Live URL comes from the remote site's home option, dev URL from
-       * WP_HOME, which Radicle's .env always defines — no extra config.
+       * Live and dev URLs both come from WP_HOME, which Radicle's .env
+       * defines on both sides — no extra config, and no reliance on
+       * WP-CLI packages the plugin doesn't ship (wp option needs
+       * entity-command).
        */
       $dev_url = rtrim(getenv('WP_HOME') ?: '', '/');
       if ($db_status === 0 && $dev_url) {
 
-        $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "bash -c \"cd '.$rem_proj_loc.' && '.$rem_proj_loc.'/vendor/bin/wp option get home\""';
+        $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "sed -n \'s/^WP_HOME=//p\' '.$rem_proj_loc.'/.env"';
         debug_message($command);
-        $live_domain = preg_replace('#^https?://(www\.)?#', '', rtrim(exec($command), '/'));
+        $live_domain = preg_replace('#^https?://(www\.)?#', '', rtrim(trim(exec($command), "'\""), '/'));
 
         if ($live_domain && $live_domain !== preg_replace('#^https?://(www\.)?#', '', $dev_url)) {
 
