@@ -2,6 +2,14 @@
 
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+### Unreleased
+
+* Added `--database` and `--media` flags to limit the sync
+* Added rsync timeout and SSH keepalive options to the uploads sync
+* Database import and rsync failures are now detected, reported, and set a non-zero exit code
+* Paths and excludes are shell-escaped in the rsync command
+* Site URLs are replaced after a database sync (`wp search-replace --all-tables` over every http/https/www variant of the live domain), using `WP_HOME` from the remote and local `.env` files — no new configuration
+
 ### 1.3.1: 03/11/2020
 
 * Added welcome and connection success messages
