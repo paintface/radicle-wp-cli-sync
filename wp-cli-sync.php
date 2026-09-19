@@ -225,7 +225,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
        * WP-CLI packages the plugin doesn't ship (wp option needs
        * entity-command).
        */
-      $dev_url = rtrim(getenv('WP_HOME') ?: '', '/');
+      $dev_url = rtrim(($_ENV['WP_HOME'] ?? getenv('WP_HOME')) ?: '', '/');
       if ($db_status === 0 && $dev_url) {
 
         $command = 'ssh -q '.$ssh_username.'@'.$ssh_hostname.' "sed -n \'s/^WP_HOME=//p\' '.$rem_proj_loc.'/.env"';
