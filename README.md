@@ -11,7 +11,7 @@
 
 A WP-CLI command for syncing a live site to a development environment.
 
-This plugin works with both [Roots Bedrock](https://github.com/roots/bedrock) projects and vanilla WordPress installations. The project layout, uploads folder and WP-CLI binary are detected automatically, and can be overridden if needed.
+This plugin works with [Roots Bedrock](https://github.com/roots/bedrock) projects (including [Radicle](https://roots.io/radicle/), which keeps Bedrock's layout under `public/`) and vanilla WordPress installations. The project layout, uploads folder and WP-CLI binary are detected automatically, and can be overridden if needed.
 
 By default the database and the uploads folder are synced on every project. On a vanilla project the plugins folder is pulled down too, since there's no composer file tracking what's installed. Bedrock projects keep their plugins under composer's control, so those are left alone. See [Partial Syncs](#partial-syncs) to sync just one part.
 
@@ -141,4 +141,4 @@ These can be set in your `.env` file or, on a vanilla project, as `wp-config.php
 | `LOCAL_WP_CLI` | The local WP-CLI binary, relative to the project root or an absolute path. Defaults to `vendor/bin/wp` when present, otherwise `wp`. |
 | `PLUGIN_DIR` | The plugins directory, relative to the project root. Defaults to `wp-content/plugins`. Only used on a vanilla project. |
 | `REMOTE_WP_CLI` | The live server's WP-CLI binary. Relative paths are resolved against `REMOTE_PROJECT_LOCATION`, absolute and `~/` paths are used as given. Defaults to `vendor/bin/wp`. |
-| `UPLOAD_DIR` | The uploads directory, relative to the project root. Defaults to `web/app/uploads` on bedrock and `wp-content/uploads` on a vanilla project. |
+| `UPLOAD_DIR` | The uploads directory, relative to the project root. Defaults to `web/app/uploads` on bedrock, `public/content/uploads` on Radicle and `wp-content/uploads` on a vanilla project. |

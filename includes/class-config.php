@@ -179,10 +179,20 @@ class Config {
 		$this->dev_domain = rtrim( self::either( $env['DEV_DOMAIN'], $this->live_domain ? 'dev.' . $this->live_domain : '' ), '/' );
 		$this->dev_url    = ( $this->dev_domain && ! preg_match( '#^https?://#', $this->dev_domain ) ) ? 'http://' . $this->dev_domain : $this->dev_domain;
 
-		// Bedrock keeps WordPress in web/wp, so its root sits two levels above
-		// ABSPATH. A classic install has its root at ABSPATH.
-		$bedrock_root     = realpath( ABSPATH . '../../' );
-		$this->is_bedrock = ( $bedrock_root && file_exists( $bedrock_root . '/web/wp-config.php' ) );
+		// Bedrock keeps WordPress in web/wp, and Radicle (bedrock based) in
+		// public/wp, so their root sits two levels above ABSPATH. A classic
+		// install has its root at ABSPATH.
+		$bedrock_root = realpath( ABSPATH . '../../' );
+		$web_dir      = '';
+
+		foreach ( array( 'web', 'public' ) as $dir ) {
+			if ( $bedrock_root && file_exists( $bedrock_root . '/' . $dir . '/wp-config.php' ) ) {
+				$web_dir = $dir;
+				break;
+			}
+		}
+
+		$this->is_bedrock = '' !== $web_dir;
 
 		$this->local_project = self::either( $env['LOCAL_PROJECT_LOCATION'], $this->is_bedrock ? $bedrock_root : rtrim( ABSPATH, '/' ) );
 
@@ -197,7 +207,8 @@ class Config {
 			$this->remote_wp_cli = $this->remote_project . '/' . $this->remote_wp_cli;
 		}
 
-		$this->upload_dir = self::either( $env['UPLOAD_DIR'], $this->is_bedrock ? 'web/app/uploads' : 'wp-content/uploads' );
+		$bedrock_uploads  = 'public' === $web_dir ? 'public/content/uploads' : 'web/app/uploads';
+		$this->upload_dir = self::either( $env['UPLOAD_DIR'], $this->is_bedrock ? $bedrock_uploads : 'wp-content/uploads' );
 
 		// Only used on a vanilla project, as bedrock keeps its plugins under
 		// composer's control.
@@ -215,6 +226,11 @@ class Config {
 
 		foreach ( self::SETTINGS as $name => $default ) {
 			$value = getenv( $name );
+
+			// Dotenv's default (safe) loaders, used by Radicle, only fill $_ENV.
+			if ( empty( $value ) && isset( $_ENV[ $name ] ) ) {
+				$value = $_ENV[ $name ]; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- The project's own .env, like getenv() above.
+			}
 
 			if ( empty( $value ) && defined( $name ) ) {
 				$value = constant( $name );
